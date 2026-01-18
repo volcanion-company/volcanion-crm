@@ -7,32 +7,45 @@ import {
   PaginationParams,
 } from '@/types';
 
+// Backend API response wrapper
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
 export const workflowApi = {
   list: async (params?: PaginationParams): Promise<PaginatedResponse<Workflow>> => {
-    return httpClient.get<PaginatedResponse<Workflow>>('/api/v1/workflows', params);
+    const response = await httpClient.get<ApiResponse<PaginatedResponse<Workflow>>>('/api/v1/workflows', params);
+    return response.data;
   },
 
   get: async (id: string): Promise<Workflow> => {
-    return httpClient.get<Workflow>(`/api/v1/workflows/${id}`);
+    const response = await httpClient.get<ApiResponse<Workflow>>(`/api/v1/workflows/${id}`);
+    return response.data;
   },
 
   create: async (data: CreateWorkflowRequest): Promise<Workflow> => {
-    return httpClient.post<Workflow>('/api/v1/workflows', data);
+    const response = await httpClient.post<ApiResponse<Workflow>>('/api/v1/workflows', data);
+    return response.data;
   },
 
   update: async (id: string, data: UpdateWorkflowRequest): Promise<Workflow> => {
-    return httpClient.put<Workflow>(`/api/v1/workflows/${id}`, data);
+    const response = await httpClient.put<ApiResponse<Workflow>>(`/api/v1/workflows/${id}`, data);
+    return response.data;
   },
 
   delete: async (id: string): Promise<void> => {
-    return httpClient.delete<void>(`/api/v1/workflows/${id}`);
+    await httpClient.delete<ApiResponse<void>>(`/api/v1/workflows/${id}`);
   },
 
   activate: async (id: string): Promise<Workflow> => {
-    return httpClient.post<Workflow>(`/api/v1/workflows/${id}/activate`);
+    const response = await httpClient.post<ApiResponse<Workflow>>(`/api/v1/workflows/${id}/activate`);
+    return response.data;
   },
 
   deactivate: async (id: string): Promise<Workflow> => {
-    return httpClient.post<Workflow>(`/api/v1/workflows/${id}/deactivate`);
+    const response = await httpClient.post<ApiResponse<Workflow>>(`/api/v1/workflows/${id}/deactivate`);
+    return response.data;
   },
 };

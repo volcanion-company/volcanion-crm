@@ -21,7 +21,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   hasPreviousPage,
   onPageChange,
 }) => {
-  const start = (page - 1) * pageSize + 1;
+  const start = totalCount > 0 ? (page - 1) * pageSize + 1 : 0;
   const end = Math.min(page * pageSize, totalCount);
 
   return (
@@ -40,7 +40,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           Previous
         </Button>
         <div className="text-sm">
-          Page {page} of {totalPages}
+          Page {page} of {totalPages || 0}
         </div>
         <Button
           variant="outline"

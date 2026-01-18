@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useTickets, useDeleteTicket, useCloseTicket, useEscalateTicket } from '@/hooks/useTickets';
+import { useTickets, useDeleteTicket } from '@/hooks/useTickets';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
@@ -9,17 +9,31 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/Badge';
 import { Pagination } from '@/components/ui/Pagination';
 import { Loading } from '@/components/ui/Loading';
-import { Plus, Search, Trash2, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Trash2, AlertCircle, Clock } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { toast } from 'sonner';
 import { TicketStatus, TicketPriority } from '@/types';
 import Link from 'next/link';
 
 const statusColors: Record<TicketStatus, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
+  [TicketStatus.New]: 'info',
   [TicketStatus.Open]: 'info',
   [TicketStatus.InProgress]: 'warning',
+  [TicketStatus.Pending]: 'default',
+  [TicketStatus.OnHold]: 'default',
   [TicketStatus.Resolved]: 'success',
   [TicketStatus.Closed]: 'default',
+  [TicketStatus.Reopened]: 'danger',
+};
+
+const statusLabels: Record<TicketStatus, string> = {
+  [TicketStatus.New]: 'New',
+  [TicketStatus.Open]: 'Open',
+  [TicketStatus.InProgress]: 'In Progress',
+  [TicketStatus.Pending]: 'Pending',
+  [TicketStatus.OnHold]: 'On Hold',
+  [TicketStatus.Resolved]: 'Resolved',
+  [TicketStatus.Closed]: 'Closed',
+  [TicketStatus.Reopened]: 'Reopened',
 };
 
 const priorityColors: Record<TicketPriority, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
@@ -29,60 +43,40 @@ const priorityColors: Record<TicketPriority, 'default' | 'success' | 'warning' |
   [TicketPriority.Critical]: 'danger',
 };
 
+const priorityLabels: Record<TicketPriority, string> = {
+  [TicketPriority.Low]: 'Low',
+  [TicketPriority.Medium]: 'Medium',
+  [TicketPriority.High]: 'High',
+  [TicketPriority.Critical]: 'Critical',
+};
+
 export default function TicketsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<string>('');
-  const [priority, setPriority] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | undefined>();
+  const [priorityFilter, setPriorityFilter] = useState<TicketPriority | undefined>();
 
-  const { data, isLoading } = useTickets({ 
-    page, 
-    pageSize: 20, 
-    search, 
-    status: status || undefined,
-    priority: priority || undefined,
+  const { data, isLoading } = useTickets({
+    page,
+    pageSize: 20,
+    search,
+    status: statusFilter,
+    priority: priorityFilter,
   });
   const deleteMutation = useDeleteTicket();
-  const closeMutation = useCloseTicket();
-  const escalateMutation = useEscalateTicket();
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this ticket?')) return;
-
-    try {
-      await deleteMutation.mutateAsync(id);
-      toast.success('Ticket deleted successfully');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete ticket');
-    }
-  };
-
-  const handleClose = async (id: string) => {
-    const resolution = prompt('Resolution:');
-    if (!resolution) return;
-
-    try {
-      await closeMutation.mutateAsync({ id, data: { resolution } });
-      toast.success('Ticket closed successfully');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to close ticket');
-    }
-  };
-
-  const handleEscalate = async (id: string) => {
-    if (!confirm('Escalate this ticket?')) return;
-
-    try {
-      await escalateMutation.mutateAsync(id);
-      toast.success('Ticket escalated successfully');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to escalate ticket');
-    }
+    await deleteMutation.mutateAsync(id);
   };
 
   if (isLoading) {
     return <Loading size="lg" className="h-96" />;
   }
+
+  const tickets = data?.items || [];
+  const totalPages = data?.totalPages || 0;
+  const totalCount = data?.totalCount || 0;
 
   return (
     <div className="space-y-6">
@@ -104,33 +98,31 @@ export default function TicketsPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search tickets..."
+              placeholder="Search by ticket number or subject..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-10"
             />
           </div>
           <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            value={statusFilter?.toString() || ''}
+            onChange={(e) => setStatusFilter(e.target.value ? Number(e.target.value) as TicketStatus : undefined)}
             className="rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
             <option value="">All Status</option>
-            <option value="Open">Open</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Resolved">Resolved</option>
-            <option value="Closed">Closed</option>
+            {Object.entries(statusLabels).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
           <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value)}
+            value={priorityFilter?.toString() || ''}
+            onChange={(e) => setPriorityFilter(e.target.value ? Number(e.target.value) as TicketPriority : undefined)}
             className="rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
             <option value="">All Priority</option>
-            <option value="Low">Low</option>
-            <option value="Medium">Medium</option>
-            <option value="High">High</option>
-            <option value="Critical">Critical</option>
+            {Object.entries(priorityLabels).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
         </div>
       </Card>
@@ -139,89 +131,101 @@ export default function TicketsPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Ticket #</TableHead>
               <TableHead>Subject</TableHead>
+              <TableHead>Customer</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Priority</TableHead>
-              <TableHead>Category</TableHead>
+              <TableHead>Assigned To</TableHead>
+              <TableHead>Due Date</TableHead>
               <TableHead>Created</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((ticket) => (
-              <TableRow key={ticket.id}>
-                <TableCell className="font-medium">
-                  <Link href={`/tickets/${ticket.id}`} className="hover:underline">
-                    {ticket.subject}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={statusColors[ticket.status]}>
-                    {ticket.status}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={priorityColors[ticket.priority]}>
-                    {ticket.priority}
-                  </Badge>
-                </TableCell>
-                <TableCell>{ticket.category || '-'}</TableCell>
-                <TableCell>{formatDate(ticket.createdAt)}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    {ticket.status !== TicketStatus.Closed && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleClose(ticket.id)}
-                          disabled={closeMutation.isPending}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEscalate(ticket.id)}
-                          disabled={escalateMutation.isPending}
-                        >
-                          <AlertTriangle className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                    <Link href={`/tickets/${ticket.id}`}>
-                      <Button variant="outline" size="sm">
-                        View
-                      </Button>
-                    </Link>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDelete(ticket.id)}
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+            {tickets.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  No tickets found
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              tickets.map((ticket) => (
+                <TableRow key={ticket.id}>
+                  <TableCell className="font-mono text-sm">
+                    <Link href={`/tickets/${ticket.id}`} className="hover:underline">
+                      {ticket.ticketNumber}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    <Link href={`/tickets/${ticket.id}`} className="hover:underline">
+                      {ticket.subject}
+                    </Link>
+                    {ticket.slaBreached && (
+                      <div className="flex items-center gap-1 text-red-600 text-xs mt-1">
+                        <AlertCircle className="h-3 w-3" />
+                        SLA Breached
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm">{ticket.customerName || '-'}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusColors[ticket.status]}>
+                      {statusLabels[ticket.status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={priorityColors[ticket.priority]}>
+                      {priorityLabels[ticket.priority]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm">{ticket.assignedToUserName || 'Unassigned'}</TableCell>
+                  <TableCell className="text-sm">
+                    {ticket.dueDate ? (
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-3 w-3 text-muted-foreground" />
+                        {formatDate(ticket.dueDate)}
+                      </div>
+                    ) : (
+                      '-'
+                    )}
+                  </TableCell>
+                  <TableCell className="text-sm">{formatDate(ticket.createdAt)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Link href={`/tickets/${ticket.id}`}>
+                        <Button variant="outline" size="sm">
+                          View
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDelete(ticket.id)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
-        {data && (
-          <div className="p-4">
-            <Pagination
-              page={data.page}
-              pageSize={data.pageSize}
-              totalCount={data.totalCount}
-              totalPages={data.totalPages}
-              hasNextPage={data.hasNextPage}
-              hasPreviousPage={data.hasPreviousPage}
-              onPageChange={setPage}
-            />
-          </div>
-        )}
       </Card>
+
+      {totalPages > 1 && (
+        <Pagination
+          page={page}
+          pageSize={data?.pageSize || 10}
+          totalCount={data?.totalCount || 0}
+          totalPages={totalPages}
+          hasNextPage={data?.hasNextPage || false}
+          hasPreviousPage={data?.hasPreviousPage || false}
+          onPageChange={setPage}
+        />
+      )}
     </div>
   );
 }

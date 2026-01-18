@@ -8,36 +8,50 @@ import {
   PaginationParams,
 } from '@/types';
 
+// Backend API response wrapper
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
 export const dealApi = {
   list: async (params?: PaginationParams & { stage?: string }): Promise<PaginatedResponse<Deal>> => {
-    return httpClient.get<PaginatedResponse<Deal>>('/api/v1/opportunities', params);
+    const response = await httpClient.get<ApiResponse<PaginatedResponse<Deal>>>('/api/v1/opportunities', params);
+    return response.data;
   },
 
   get: async (id: string): Promise<Deal> => {
-    return httpClient.get<Deal>(`/api/v1/opportunities/${id}`);
+    const response = await httpClient.get<ApiResponse<Deal>>(`/api/v1/opportunities/${id}`);
+    return response.data;
   },
 
   create: async (data: CreateDealRequest): Promise<Deal> => {
-    return httpClient.post<Deal>('/api/v1/opportunities', data);
+    const response = await httpClient.post<ApiResponse<Deal>>('/api/v1/opportunities', data);
+    return response.data;
   },
 
   update: async (id: string, data: UpdateDealRequest): Promise<Deal> => {
-    return httpClient.put<Deal>(`/api/v1/opportunities/${id}`, data);
+    const response = await httpClient.put<ApiResponse<Deal>>(`/api/v1/opportunities/${id}`, data);
+    return response.data;
   },
 
   delete: async (id: string): Promise<void> => {
-    return httpClient.delete<void>(`/api/v1/opportunities/${id}`);
+    await httpClient.delete<ApiResponse<void>>(`/api/v1/opportunities/${id}`);
   },
 
   moveToNextStage: async (id: string): Promise<Deal> => {
-    return httpClient.put<Deal>(`/api/v1/opportunities/${id}/stage`);
+    const response = await httpClient.put<ApiResponse<Deal>>(`/api/v1/opportunities/${id}/stage`);
+    return response.data;
   },
 
   win: async (id: string): Promise<Deal> => {
-    return httpClient.post<Deal>(`/api/v1/opportunities/${id}/win`);
+    const response = await httpClient.post<ApiResponse<Deal>>(`/api/v1/opportunities/${id}/win`);
+    return response.data;
   },
 
   lose: async (id: string, data: LoseDealRequest): Promise<Deal> => {
-    return httpClient.post<Deal>(`/api/v1/opportunities/${id}/lose`, data);
+    const response = await httpClient.post<ApiResponse<Deal>>(`/api/v1/opportunities/${id}/lose`, data);
+    return response.data;
   },
 };

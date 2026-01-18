@@ -90,6 +90,11 @@ public class TenantDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        // Ignore entities from MasterDbContext to avoid cross-database FK constraints
+        modelBuilder.Ignore<Tenant>();
+        modelBuilder.Ignore<Permission>();
+        modelBuilder.Ignore<AuditLog>();
+
         ConfigureIdentityEntities(modelBuilder);
         ConfigureCustomerEntities(modelBuilder);
         ConfigureLeadEntities(modelBuilder);
@@ -112,6 +117,9 @@ public class TenantDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.TenantId, e.Email }).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
+            
+            // Ignore navigation to Tenant (cross-database relationship)
+            entity.Ignore(e => e.Tenant);
         });
 
         modelBuilder.Entity<Role>(entity =>
@@ -120,6 +128,9 @@ public class TenantDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.TenantId, e.Name }).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
+            
+            // Ignore navigation to Tenant (cross-database relationship)
+            entity.Ignore(e => e.Tenant);
         });
 
         // Permission is configured in MasterDbContext (master schema)
@@ -153,10 +164,10 @@ public class TenantDbContext : DbContext
                 .HasForeignKey(e => e.RoleId)
                 .OnDelete(DeleteBehavior.Cascade);
                 
-            entity.HasOne(e => e.Permission)
-                .WithMany(p => p.RolePermissions)
-                .HasForeignKey(e => e.PermissionId)
-                .OnDelete(DeleteBehavior.Cascade);
+            // Permission is in MasterDbContext - no FK constraint (cross-database)
+            // Only store PermissionId as a property, no navigation
+            entity.Ignore(e => e.Permission);
+            entity.Property(e => e.PermissionId).IsRequired();
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>

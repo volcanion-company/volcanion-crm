@@ -29,10 +29,8 @@ class HttpClient {
             const newToken = await this.refreshToken();
             config.headers.Authorization = `Bearer ${newToken}`;
           } catch (error) {
+            console.error('[HTTP] Token refresh failed:', error);
             this.clearAuth();
-            if (typeof window !== 'undefined') {
-              window.location.href = '/auth/login';
-            }
             return Promise.reject(error);
           }
         } else if (token) {
@@ -41,13 +39,25 @@ class HttpClient {
 
         return config;
       },
-      (error) => Promise.reject(error)
+      (error) => {
+        console.error('[HTTP] Request interceptor error:', error);
+        return Promise.reject(error);
+      }
     );
 
     // Response interceptor
     this.client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        return response;
+      },
       async (error: AxiosError<ApiError>) => {
+        console.error('[HTTP] Response error:', {
+          url: error.config?.url,
+          status: error.response?.status,
+          message: error.message,
+          responseData: error.response?.data
+        });
+        
         const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
         // Handle 401 Unauthorized
@@ -61,7 +71,9 @@ class HttpClient {
             }
             return this.client(originalRequest);
           } catch (refreshError) {
+            console.error('[HTTP] Token refresh failed after 401:', refreshError);
             this.clearAuth();
+            
             if (typeof window !== 'undefined') {
               window.location.href = '/auth/login';
             }
@@ -76,12 +88,22 @@ class HttpClient {
 
   private getAccessToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(AUTH_CONFIG.TOKEN_KEY);
+    const token = localStorage.getItem(AUTH_CONFIG.TOKEN_KEY);
+    // Validate token is not empty or invalid string
+    if (!token || token === 'undefined' || token === 'null' || token.trim() === '') {
+      return null;
+    }
+    return token;
   }
 
   private getRefreshToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(AUTH_CONFIG.REFRESH_TOKEN_KEY);
+    const token = localStorage.getItem(AUTH_CONFIG.REFRESH_TOKEN_KEY);
+    // Validate token is not empty or invalid string
+    if (!token || token === 'undefined' || token === 'null' || token.trim() === '') {
+      return null;
+    }
+    return token;
   }
 
   private shouldRefreshToken(): boolean {
@@ -115,10 +137,10 @@ class HttpClient {
           }
         );
 
-        const { token, refreshToken: newRefreshToken, expiresIn } = response.data;
+        const { accessToken, refreshToken: newRefreshToken, expiresIn } = response.data;
         
         if (typeof window !== 'undefined') {
-          localStorage.setItem(AUTH_CONFIG.TOKEN_KEY, token);
+          localStorage.setItem(AUTH_CONFIG.TOKEN_KEY, accessToken);
           localStorage.setItem(AUTH_CONFIG.REFRESH_TOKEN_KEY, newRefreshToken);
           localStorage.setItem(
             AUTH_CONFIG.EXPIRES_AT_KEY,
@@ -126,7 +148,7 @@ class HttpClient {
           );
         }
 
-        return token;
+        return accessToken;
       } finally {
         this.tokenRefreshPromise = null;
       }
@@ -183,6 +205,12 @@ class HttpClient {
 
   public setAuthToken(token: string, refreshToken: string, expiresIn: number) {
     if (typeof window === 'undefined') return;
+    
+    // Validate tokens before saving
+    if (!token || token === 'undefined' || !refreshToken || refreshToken === 'undefined') {
+      console.error('[HTTP] Invalid tokens provided to setAuthToken');
+      return;
+    }
     
     localStorage.setItem(AUTH_CONFIG.TOKEN_KEY, token);
     localStorage.setItem(AUTH_CONFIG.REFRESH_TOKEN_KEY, refreshToken);

@@ -189,14 +189,14 @@ public static class DatabaseSeeder
         {
             Id = Guid.Parse("00000000-0000-0000-0000-000000000100"),
             TenantId = defaultTenantId,
-            Email = "admin@crmsaas.local",
+            Email = "admin@volcanion.vn",
             PasswordHash = HashPassword("Admin@123"),
             FirstName = "System",
             LastName = "Administrator",
             Status = UserStatus.Active,
             EmailConfirmed = true,
-            TimeZone = "UTC",
-            Culture = "en-US",
+            TimeZone = "Asia/Ho_Chi_Minh",
+            Culture = "vi-VN",
             CreatedAt = DateTime.UtcNow
         };
 

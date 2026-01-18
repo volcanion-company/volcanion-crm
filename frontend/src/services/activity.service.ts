@@ -7,28 +7,40 @@ import {
   PaginationParams,
 } from '@/types';
 
+// Backend API response wrapper
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
 export const activityApi = {
   list: async (params?: PaginationParams): Promise<PaginatedResponse<Activity>> => {
-    return httpClient.get<PaginatedResponse<Activity>>('/api/v1/activities', params);
+    const response = await httpClient.get<ApiResponse<PaginatedResponse<Activity>>>('/api/v1/activities', params);
+    return response.data;
   },
 
   get: async (id: string): Promise<Activity> => {
-    return httpClient.get<Activity>(`/api/v1/activities/${id}`);
+    const response = await httpClient.get<ApiResponse<Activity>>(`/api/v1/activities/${id}`);
+    return response.data;
   },
 
   create: async (data: CreateActivityRequest): Promise<Activity> => {
-    return httpClient.post<Activity>('/api/v1/activities', data);
+    const response = await httpClient.post<ApiResponse<Activity>>('/api/v1/activities', data);
+    return response.data;
   },
 
   update: async (id: string, data: UpdateActivityRequest): Promise<Activity> => {
-    return httpClient.put<Activity>(`/api/v1/activities/${id}`, data);
+    const response = await httpClient.put<ApiResponse<Activity>>(`/api/v1/activities/${id}`, data);
+    return response.data;
   },
 
   delete: async (id: string): Promise<void> => {
-    return httpClient.delete<void>(`/api/v1/activities/${id}`);
+    await httpClient.delete<ApiResponse<void>>(`/api/v1/activities/${id}`);
   },
 
   complete: async (id: string): Promise<Activity> => {
-    return httpClient.post<Activity>(`/api/v1/activities/${id}/complete`);
+    const response = await httpClient.post<ApiResponse<Activity>>(`/api/v1/activities/${id}/complete`);
+    return response.data;
   },
 };

@@ -29,17 +29,20 @@ public class CampaignsController : BaseController
     [HttpGet]
     [RequirePermission(Permissions.CampaignView)]
     public async Task<ActionResult<ApiResponse<PagedResult<CampaignResponse>>>> GetAll(
-        [FromQuery] PaginationParams pagination,
-        [FromQuery] CampaignStatus? status = null,
-        [FromQuery] CampaignType? type = null)
+        [FromQuery] CampaignFilterParams filters)
     {
         var query = _db.Campaigns
             .AsNoTracking()
-            .WhereIf(status.HasValue, c => c.Status == status!.Value)
-            .WhereIf(type.HasValue, c => c.Type == type!.Value)
-            .WhereIf(!string.IsNullOrEmpty(pagination.Search), c =>
-                c.Name.Contains(pagination.Search!))
-            .ApplySorting(pagination.SortBy ?? "CreatedAt", pagination.SortDescending);
+            .WhereIf(!string.IsNullOrEmpty(filters.Status), c => c.Status.ToString() == filters.Status)
+            .WhereIf(!string.IsNullOrEmpty(filters.Type), c => c.Type.ToString() == filters.Type)
+            .WhereIf(!string.IsNullOrEmpty(filters.Name), c => c.Name.Contains(filters.Name!))
+            .WhereIf(!string.IsNullOrEmpty(filters.Search), c =>
+                c.Name.Contains(filters.Search!) || c.Description!.Contains(filters.Search!))
+            .WhereIf(filters.StartDateFrom.HasValue, c => c.StartDate >= filters.StartDateFrom!.Value)
+            .WhereIf(filters.StartDateTo.HasValue, c => c.StartDate <= filters.StartDateTo!.Value)
+            .WhereIf(filters.MinBudget.HasValue, c => c.Budget >= filters.MinBudget!.Value)
+            .WhereIf(filters.MaxBudget.HasValue, c => c.Budget <= filters.MaxBudget!.Value)
+            .ApplySorting(filters.SortBy ?? "CreatedAt", filters.SortDescending);
 
         var result = await query
             .Select(c => new CampaignResponse
@@ -59,7 +62,7 @@ public class CampaignsController : BaseController
                 TotalSent = c.TotalSent,
                 CreatedAt = c.CreatedAt
             })
-            .ToPagedResultAsync(pagination.PageNumber, pagination.PageSize);
+            .ToPagedResultAsync(filters.Page, filters.PageSize);
 
         return OkResponse(result);
     }
@@ -475,4 +478,33 @@ public class CampaignPerformanceResponse
     public decimal OpenRate { get; set; }
     public decimal ClickRate { get; set; }
     public decimal ConversionRate { get; set; }
+}
+
+public class CampaignFilterParams
+{
+    private const int MaxPageSize = 100;
+    private int _pageSize = 10;
+
+    // Pagination
+    public int Page { get; set; } = 1;
+    
+    public int PageSize
+    {
+        get => _pageSize;
+        set => _pageSize = value > MaxPageSize ? MaxPageSize : value;
+    }
+
+    // Sorting
+    public string? SortBy { get; set; }
+    public bool SortDescending { get; set; } = false;
+
+    // Filters
+    public string? Status { get; set; }
+    public string? Type { get; set; }
+    public string? Name { get; set; }
+    public string? Search { get; set; }
+    public DateTime? StartDateFrom { get; set; }
+    public DateTime? StartDateTo { get; set; }
+    public decimal? MinBudget { get; set; }
+    public decimal? MaxBudget { get; set; }
 }

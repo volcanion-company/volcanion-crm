@@ -51,9 +51,11 @@ public class ReportsController : BaseController
             TotalPipelineValue = await _db.Opportunities
                 .Where(o => o.Status == OpportunityStatus.Open)
                 .SumAsync(o => o.Amount),
-            WeightedPipelineValue = await _db.Opportunities
+            WeightedPipelineValue = (await _db.Opportunities
                 .Where(o => o.Status == OpportunityStatus.Open)
-                .SumAsync(o => o.WeightedAmount),
+                .Select(o => new { o.Amount, o.Probability })
+                .ToListAsync())
+                .Sum(o => o.Amount * o.Probability / 100m),
             WonOpportunitiesThisMonth = await _db.Opportunities
                 .Where(o => o.Status == OpportunityStatus.Won && o.ActualCloseDate >= startOfMonth)
                 .CountAsync(),

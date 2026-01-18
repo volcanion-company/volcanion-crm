@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useDeals, useDeleteDeal, useWinDeal, useLoseDeal } from '@/hooks/useDeals';
+import { useOpportunities, useDeleteOpportunity, useMarkAsWon, useMarkAsLost } from '@/hooks/useOpportunities';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
@@ -12,59 +13,61 @@ import { Loading } from '@/components/ui/Loading';
 import { Plus, Search, Trash2, TrendingUp, TrendingDown } from 'lucide-react';
 import { formatDate, formatCurrency, formatPercent } from '@/lib/utils';
 import { toast } from 'sonner';
-import { DealStage } from '@/types';
+import { OpportunityStage } from '@/types';
 import Link from 'next/link';
 
-const stageColors: Record<DealStage, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
-  [DealStage.Qualification]: 'info',
-  [DealStage.Proposal]: 'warning',
-  [DealStage.Negotiation]: 'warning',
-  [DealStage.Closing]: 'info',
-  [DealStage.Won]: 'success',
-  [DealStage.Lost]: 'danger',
+const stageColors: Record<OpportunityStage, 'default' | 'success' | 'warning' | 'danger' | 'info'> = {
+  [OpportunityStage.Prospecting]: 'default',
+  [OpportunityStage.Qualification]: 'info',
+  [OpportunityStage.Proposal]: 'warning',
+  [OpportunityStage.Negotiation]: 'warning',
+  [OpportunityStage.ClosedWon]: 'success',
+  [OpportunityStage.ClosedLost]: 'danger',
 };
 
 export default function DealsPage() {
+  const t = useTranslations('deals');
+  const tCommon = useTranslations('common');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [stage, setStage] = useState<string>('');
 
-  const { data, isLoading } = useDeals({ page, pageSize: 20, search, stage: stage || undefined });
-  const deleteMutation = useDeleteDeal();
-  const winMutation = useWinDeal();
-  const loseMutation = useLoseDeal();
+  const { data, isLoading } = useOpportunities({ page, pageSize: 20 });
+  const deleteMutation = useDeleteOpportunity();
+  const winMutation = useMarkAsWon();
+  const loseMutation = useMarkAsLost();
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this deal?')) return;
+    if (!confirm(t('messages.confirmDelete') || 'Are you sure?')) return;
 
     try {
       await deleteMutation.mutateAsync(id);
-      toast.success('Deal deleted successfully');
+      toast.success(t('messages.deleteSuccess'));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete deal');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete opportunity');
     }
   };
 
   const handleWin = async (id: string) => {
-    if (!confirm('Mark this deal as won?')) return;
+    if (!confirm('Mark this opportunity as won?')) return;
 
     try {
       await winMutation.mutateAsync(id);
-      toast.success('Deal marked as won!');
+      toast.success('Opportunity marked as won! 🎉');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to win deal');
+      toast.error(error instanceof Error ? error.message : 'Failed to win opportunity');
     }
   };
 
   const handleLose = async (id: string) => {
-    const reason = prompt('Reason for losing this deal:');
-    if (!reason) return;
+    const reason = prompt('Reason for losing this opportunity:');
+    if (reason === null) return;
 
     try {
-      await loseMutation.mutateAsync({ id, data: { lostReason: reason } });
-      toast.success('Deal marked as lost');
+      await loseMutation.mutateAsync({ id, lossReason: reason || undefined });
+      toast.success('Opportunity marked as lost');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to lose deal');
+      toast.error(error instanceof Error ? error.message : 'Failed to lose opportunity');
     }
   };
 
@@ -76,7 +79,7 @@ export default function DealsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Deals</h1>
+          <h1 className="text-3xl font-bold">{t('title')}</h1>
           <p className="text-muted-foreground">Manage your sales pipeline</p>
         </div>
         <Link href="/deals/new">
@@ -104,7 +107,9 @@ export default function DealsPage() {
             className="rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
             <option value="">All Stages</option>
+            <option value="Prospecting">Prospecting</option>
             <option value="Qualification">Qualification</option>
+            <option value="NeedsAnalysis">Needs Analysis</option>
             <option value="Proposal">Proposal</option>
             <option value="Negotiation">Negotiation</option>
             <option value="Closing">Closing</option>
@@ -128,32 +133,32 @@ export default function DealsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((deal) => (
-              <TableRow key={deal.id}>
+            {data?.items.map((opportunity) => (
+              <TableRow key={opportunity.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/deals/${deal.id}`} className="hover:underline">
-                    {deal.name}
+                  <Link href={`/deals/${opportunity.id}`} className="hover:underline">
+                    {opportunity.name}
                   </Link>
                 </TableCell>
-                <TableCell>{formatCurrency(deal.amount)}</TableCell>
+                <TableCell>{formatCurrency(opportunity.amount)}</TableCell>
                 <TableCell>
-                  <Badge variant={stageColors[deal.stage]}>
-                    {deal.stage}
+                  <Badge variant={stageColors[opportunity.stage]}>
+                    {opportunity.stage}
                   </Badge>
                 </TableCell>
-                <TableCell>{formatPercent(deal.probability)}</TableCell>
+                <TableCell>{formatPercent(opportunity.probability)}</TableCell>
                 <TableCell>
-                  {deal.expectedCloseDate ? formatDate(deal.expectedCloseDate) : '-'}
+                  {opportunity.expectedCloseDate ? formatDate(opportunity.expectedCloseDate) : '-'}
                 </TableCell>
-                <TableCell>{formatDate(deal.createdAt)}</TableCell>
+                <TableCell>{formatDate(opportunity.createdAt)}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
-                    {deal.stage !== DealStage.Won && deal.stage !== DealStage.Lost && (
+                    {opportunity.stage !== OpportunityStage.ClosedWon && opportunity.stage !== OpportunityStage.ClosedLost && (
                       <>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleWin(deal.id)}
+                          onClick={() => handleWin(opportunity.id)}
                           disabled={winMutation.isPending}
                         >
                           <TrendingUp className="h-4 w-4" />
@@ -161,14 +166,14 @@ export default function DealsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleLose(deal.id)}
+                          onClick={() => handleLose(opportunity.id)}
                           disabled={loseMutation.isPending}
                         >
                           <TrendingDown className="h-4 w-4" />
                         </Button>
                       </>
                     )}
-                    <Link href={`/deals/${deal.id}`}>
+                    <Link href={`/deals/${opportunity.id}`}>
                       <Button variant="outline" size="sm">
                         Edit
                       </Button>
@@ -176,7 +181,7 @@ export default function DealsPage() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => handleDelete(deal.id)}
+                      onClick={() => handleDelete(opportunity.id)}
                       disabled={deleteMutation.isPending}
                     >
                       <Trash2 className="h-4 w-4" />

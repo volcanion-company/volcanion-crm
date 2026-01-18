@@ -6,11 +6,30 @@ interface ReportParams {
   endDate: string;
 }
 
-export const useSalesPipelineReport = (params: ReportParams) => {
+interface PipelineAnalysisParams {
+  pipelineId: string;
+}
+
+export const useDashboardReport = () => {
   return useQuery({
-    queryKey: ['reports', 'sales-pipeline', params],
-    queryFn: () => reportApi.salesPipeline(params),
+    queryKey: ['reports', 'dashboard'],
+    queryFn: () => reportApi.dashboard(),
+  });
+};
+
+export const useSalesPerformanceReport = (params: ReportParams) => {
+  return useQuery({
+    queryKey: ['reports', 'sales-performance', params],
+    queryFn: () => reportApi.salesPerformance(params),
     enabled: !!params.startDate && !!params.endDate,
+  });
+};
+
+export const usePipelineAnalysisReport = (params: PipelineAnalysisParams) => {
+  return useQuery({
+    queryKey: ['reports', 'pipeline-analysis', params],
+    queryFn: () => reportApi.pipelineAnalysis(params),
+    enabled: !!params.pipelineId,
   });
 };
 
@@ -30,10 +49,10 @@ export const useTicketAnalyticsReport = (params: ReportParams) => {
   });
 };
 
-export const useUserActivityReport = (params: ReportParams) => {
+export const useActivitySummaryReport = (params: ReportParams) => {
   return useQuery({
-    queryKey: ['reports', 'user-activity', params],
-    queryFn: () => reportApi.userActivity(params),
+    queryKey: ['reports', 'activity-summary', params],
+    queryFn: () => reportApi.activitySummary(params),
     enabled: !!params.startDate && !!params.endDate,
   });
 };

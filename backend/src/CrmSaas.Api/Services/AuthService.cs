@@ -24,27 +24,30 @@ public interface IAuthService
 public class AuthService : IAuthService
 {
     private readonly TenantDbContext _db;
+    private readonly MasterDbContext _masterDb;
     private readonly JwtSettings _jwtSettings;
     private readonly ILogger<AuthService> _logger;
 
     public AuthService(
         TenantDbContext db,
+        MasterDbContext masterDb,
         IOptions<JwtSettings> jwtSettings,
         ILogger<AuthService> logger)
     {
         _db = db;
+        _masterDb = masterDb;
         _jwtSettings = jwtSettings.Value;
         _logger = logger;
     }
 
     public async Task<AuthResult> LoginAsync(LoginRequest request, string? ipAddress = null)
     {
+        // Load user with roles and role permissions (but not Permission navigation)
         var user = await _db.Users
             .IgnoreQueryFilters()
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .ThenInclude(r => r!.RolePermissions)
-            .ThenInclude(rp => rp.Permission)
             .FirstOrDefaultAsync(u => u.Email == request.Email && !u.IsDeleted);
 
         if (user == null)
@@ -92,7 +95,7 @@ public class AuthService : IAuthService
         user.FailedLoginAttempts = 0;
         user.LastLoginAt = DateTime.UtcNow;
 
-        var accessToken = GenerateAccessToken(user);
+        var accessToken = await GenerateAccessTokenAsync(user);
         var refreshToken = await GenerateRefreshTokenAsync(user.Id, ipAddress);
 
         await _db.SaveChangesAsync();
@@ -109,7 +112,6 @@ public class AuthService : IAuthService
             .ThenInclude(u => u!.UserRoles)
             .ThenInclude(ur => ur.Role)
             .ThenInclude(r => r!.RolePermissions)
-            .ThenInclude(rp => rp.Permission)
             .FirstOrDefaultAsync(t => t.Token == refreshToken);
 
         if (token == null)
@@ -132,7 +134,7 @@ public class AuthService : IAuthService
         token.ReasonRevoked = "Replaced by new token";
 
         // Generate new tokens
-        var newAccessToken = GenerateAccessToken(user);
+        var newAccessToken = await GenerateAccessTokenAsync(user);
         var newRefreshToken = await GenerateRefreshTokenAsync(user.Id, ipAddress);
         
         token.ReplacedByToken = newRefreshToken.Token;
@@ -196,7 +198,7 @@ public class AuthService : IAuthService
         return HashPassword(password) == hash;
     }
 
-    private string GenerateAccessToken(User user)
+    private async Task<string> GenerateAccessTokenAsync(User user)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -210,6 +212,19 @@ public class AuthService : IAuthService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
+        // Get all permission IDs from user's roles
+        var permissionIds = user.UserRoles
+            .Where(ur => ur.Role != null)
+            .SelectMany(ur => ur.Role!.RolePermissions)
+            .Select(rp => rp.PermissionId)
+            .Distinct()
+            .ToList();
+
+        // Load permissions from MasterDb
+        var permissions = await _masterDb.Permissions
+            .Where(p => permissionIds.Contains(p.Id))
+            .ToListAsync();
+
         // Add role claims
         foreach (var userRole in user.UserRoles)
         {
@@ -221,9 +236,10 @@ public class AuthService : IAuthService
                 // Add permission claims
                 foreach (var rp in userRole.Role.RolePermissions)
                 {
-                    if (rp.Permission != null)
+                    var permission = permissions.FirstOrDefault(p => p.Id == rp.PermissionId);
+                    if (permission != null)
                     {
-                        claims.Add(new Claim("permission", rp.Permission.Code));
+                        claims.Add(new Claim("permission", permission.Code));
                     }
                 }
             }

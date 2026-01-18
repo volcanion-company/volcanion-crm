@@ -8,28 +8,40 @@ import {
   PaginationParams,
 } from '@/types';
 
+// Backend API response wrapper
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
 export const webhookApi = {
   list: async (params?: PaginationParams): Promise<PaginatedResponse<Webhook>> => {
-    return httpClient.get<PaginatedResponse<Webhook>>('/api/v1/webhooks', params);
+    const response = await httpClient.get<ApiResponse<PaginatedResponse<Webhook>>>('/api/v1/webhooks', params);
+    return response.data;
   },
 
   get: async (id: string): Promise<Webhook> => {
-    return httpClient.get<Webhook>(`/api/v1/webhooks/${id}`);
+    const response = await httpClient.get<ApiResponse<Webhook>>(`/api/v1/webhooks/${id}`);
+    return response.data;
   },
 
   create: async (data: CreateWebhookRequest): Promise<Webhook> => {
-    return httpClient.post<Webhook>('/api/v1/webhooks', data);
+    const response = await httpClient.post<ApiResponse<Webhook>>('/api/v1/webhooks', data);
+    return response.data;
   },
 
   update: async (id: string, data: UpdateWebhookRequest): Promise<Webhook> => {
-    return httpClient.put<Webhook>(`/api/v1/webhooks/${id}`, data);
+    const response = await httpClient.put<ApiResponse<Webhook>>(`/api/v1/webhooks/${id}`, data);
+    return response.data;
   },
 
   delete: async (id: string): Promise<void> => {
-    return httpClient.delete<void>(`/api/v1/webhooks/${id}`);
+    await httpClient.delete<ApiResponse<void>>(`/api/v1/webhooks/${id}`);
   },
 
   getDeliveries: async (id: string, params?: PaginationParams): Promise<PaginatedResponse<WebhookDelivery>> => {
-    return httpClient.get<PaginatedResponse<WebhookDelivery>>(`/api/v1/webhooks/${id}/deliveries`, params);
+    const response = await httpClient.get<ApiResponse<PaginatedResponse<WebhookDelivery>>>(`/api/v1/webhooks/${id}/deliveries`, params);
+    return response.data;
   },
 };

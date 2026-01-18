@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Serilog;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -290,7 +291,42 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 // ========================================
 // OPENAPI / SWAGGER
 // ========================================
-builder.Services.AddOpenApi();
+// Using Swashbuckle for .NET 8 compatibility
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "CRM SaaS API",
+        Version = "v1",
+        Description = "A comprehensive CRM SaaS API with multi-tenancy support"
+    });
+    
+    // Add JWT authentication to Swagger
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token in the text input below.",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+    
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 // ========================================
 // HEALTH CHECKS
@@ -358,7 +394,10 @@ app.UseSerilogRequestLogging(options =>
 // Development-specific middleware
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    // Enable Swagger
+    app.UseSwagger();
+    
+    // Map Scalar UI (which uses the Swagger document)
     app.MapScalarApiReference(options =>
     {
         options.Title = "CRM SaaS API";
@@ -477,21 +516,21 @@ using (var scope = app.Services.CreateScope())
     
     // Process pending webhook deliveries - every minute
     var webhookDeliveryService = scope.ServiceProvider.GetRequiredService<IWebhookDeliveryService>();
-    backgroundJobService.AddOrUpdateRecurringJob<IWebhookDeliveryService>(
+    RecurringJob.AddOrUpdate<IWebhookDeliveryService>(
         "process-pending-webhooks",
-        x => x.ProcessPendingDeliveriesAsync(),
+        x => x.ProcessPendingDeliveriesAsync(default),
         "* * * * *"); // Every minute
     
     // Retry failed webhook deliveries - every 5 minutes
-    backgroundJobService.AddOrUpdateRecurringJob<IWebhookDeliveryService>(
+    RecurringJob.AddOrUpdate<IWebhookDeliveryService>(
         "retry-failed-webhooks",
-        x => x.RetryFailedDeliveriesAsync(),
+        x => x.RetryFailedDeliveriesAsync(default),
         "*/5 * * * *"); // Every 5 minutes
     
     // Send activity reminders - every 5 minutes
-    backgroundJobService.AddOrUpdateRecurringJob<IActivityReminderService>(
+    RecurringJob.AddOrUpdate<IActivityReminderService>(
         "send-activity-reminders",
-        x => x.SendDueRemindersAsync(CancellationToken.None),
+        x => x.SendDueRemindersAsync(default),
         "*/5 * * * *"); // Every 5 minutes
     
     Log.Information("Recurring jobs configured successfully");

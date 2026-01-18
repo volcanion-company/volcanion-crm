@@ -1,33 +1,49 @@
 'use client';
 
 import { useState } from 'react';
-import { useCompanies, useDeleteCompany } from '@/hooks/useCompanies';
+import { useCustomers, useDeleteCustomer } from '@/hooks/useCustomers';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { Loading } from '@/components/ui/Loading';
-import { Plus, Search, Trash2 } from 'lucide-react';
+import { Plus, Search, Trash2, Edit, Building2, Users, TrendingUp } from 'lucide-react';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
+import { CustomerStatus, CustomerType } from '@/types';
+import { Badge } from '@/components/ui/Badge';
 import Link from 'next/link';
 
+const statusColors: Record<CustomerStatus, 'default' | 'success' | 'warning' | 'danger'> = {
+  [CustomerStatus.Active]: 'success',
+  [CustomerStatus.Inactive]: 'default',
+  [CustomerStatus.Prospect]: 'warning',
+  [CustomerStatus.Churned]: 'danger',
+};
+
+const typeColors: Record<CustomerType, 'default' | 'info'> = {
+  [CustomerType.Individual]: 'default',
+  [CustomerType.Business]: 'info',
+};
+
 export default function CompaniesPage() {
+  const t = useTranslations('companies');
+  const tCommon = useTranslations('common');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
 
-  const { data, isLoading } = useCompanies({ page, pageSize: 20, search });
-  const deleteMutation = useDeleteCompany();
+  const { data, isLoading } = useCustomers({ page, pageSize: 20 });
+  const deleteMutation = useDeleteCustomer();
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this company?')) return;
+    if (!confirm('Are you sure you want to delete this customer?')) return;
 
     try {
       await deleteMutation.mutateAsync(id);
-      toast.success('Company deleted successfully');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete company');
+      // Error toast handled by hook
     }
   };
 
@@ -39,13 +55,13 @@ export default function CompaniesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Companies</h1>
-          <p className="text-muted-foreground">Manage company accounts</p>
+          <h1 className="text-3xl font-bold">{t('title')}</h1>
+          <p className="text-muted-foreground">Manage your customer accounts</p>
         </div>
         <Link href="/companies/new">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
-            Add Company
+            Add Customer
           </Button>
         </Link>
       </div>
@@ -54,7 +70,7 @@ export default function CompaniesPage() {
         <div className="relative">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search companies..."
+            placeholder={tCommon('search') + '...'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -67,53 +83,48 @@ export default function CompaniesPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Industry</TableHead>
-              <TableHead>Website</TableHead>
-              <TableHead>Employees</TableHead>
-              <TableHead>Revenue</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Phone</TableHead>
+              <TableHead>Lifetime Value</TableHead>
               <TableHead>Created</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="text-right">{tCommon('actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.items.map((company) => (
-              <TableRow key={company.id}>
+            {data?.items?.map((customer) => (
+              <TableRow key={customer.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/companies/${company.id}`} className="hover:underline">
-                    {company.name}
+                  <Link href={`/companies/${customer.id}`} className="hover:underline">
+                    {customer.firstName} {customer.lastName}
                   </Link>
                 </TableCell>
-                <TableCell>{company.industry || '-'}</TableCell>
                 <TableCell>
-                  {company.website ? (
-                    <a
-                      href={company.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      {company.website}
-                    </a>
-                  ) : (
-                    '-'
-                  )}
+                  <Badge variant={typeColors[customer.type]}>
+                    {customer.type}
+                  </Badge>
                 </TableCell>
-                <TableCell>{company.employeeCount || '-'}</TableCell>
                 <TableCell>
-                  {company.annualRevenue ? formatCurrency(company.annualRevenue) : '-'}
+                  <Badge variant={statusColors[customer.status]}>
+                    {customer.status}
+                  </Badge>
                 </TableCell>
-                <TableCell>{formatDate(company.createdAt)}</TableCell>
+                <TableCell>{customer.email}</TableCell>
+                <TableCell>{customer.phone || '-'}</TableCell>
+                <TableCell>{formatCurrency(customer.lifetimeValue || 0)}</TableCell>
+                <TableCell>{formatDate(customer.createdAt)}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
-                    <Link href={`/companies/${company.id}`}>
+                    <Link href={`/companies/${customer.id}`}>
                       <Button variant="outline" size="sm">
-                        Edit
+                        <Edit className="h-4 w-4" />
                       </Button>
                     </Link>
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => handleDelete(company.id)}
+                      onClick={() => handleDelete(customer.id)}
                       disabled={deleteMutation.isPending}
                     >
                       <Trash2 className="h-4 w-4" />

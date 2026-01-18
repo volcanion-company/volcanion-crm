@@ -2,9 +2,12 @@
 
 import { useState } from 'react';
 import { useRegister } from '@/hooks/useAuth';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { LanguageToggle } from '@/components/ui/LanguageToggle';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
@@ -14,6 +17,7 @@ export default function RegisterPage() {
   const [tenantName, setTenantName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const registerMutation = useRegister();
+  const t = useTranslations('auth');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,25 +29,29 @@ export default function RegisterPage() {
         tenantName,
         companyName,
       });
-      toast.success('Registration successful!');
+      toast.success(t('registerSuccess'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Registration failed');
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-muted/50 px-4">
+      <div className="absolute top-4 right-4 flex items-center gap-2">
+        <LanguageToggle />
+        <ThemeToggle />
+      </div>
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-center text-3xl">CRM SaaS</CardTitle>
           <p className="text-center text-sm text-muted-foreground">
-            Create your account
+            {t('createAccount')}
           </p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Email"
+              label={t('email')}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -51,15 +59,15 @@ export default function RegisterPage() {
               required
             />
             <Input
-              label="Password"
+              label={t('password')}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Strong password (min 8 chars)"
+              placeholder="••••••••"
               required
             />
             <Input
-              label="Tenant Name"
+              label={t('tenantName')}
               type="text"
               value={tenantName}
               onChange={(e) => setTenantName(e.target.value)}
@@ -67,7 +75,7 @@ export default function RegisterPage() {
               required
             />
             <Input
-              label="Company Name"
+              label={t('tenantName')}
               type="text"
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
@@ -79,13 +87,13 @@ export default function RegisterPage() {
               className="w-full"
               disabled={registerMutation.isPending}
             >
-              {registerMutation.isPending ? 'Creating account...' : 'Create account'}
+              {registerMutation.isPending ? '...' : t('createAccount')}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm">
-            Already have an account?{' '}
+            {t('alreadyHaveAccount')}{' '}
             <Link href="/auth/login" className="text-primary hover:underline">
-              Sign in
+              {t('login')}
             </Link>
           </div>
         </CardContent>

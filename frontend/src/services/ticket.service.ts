@@ -1,39 +1,88 @@
 import { httpClient } from '@/lib/http-client';
-import {
+import type {
   Ticket,
   CreateTicketRequest,
   UpdateTicketRequest,
-  CloseTicketRequest,
+  AssignTicketRequest,
+  PauseSLARequest,
   PaginatedResponse,
   PaginationParams,
+  TicketStatus,
+  TicketPriority,
 } from '@/types';
 
-export const ticketApi = {
-  list: async (params?: PaginationParams & { status?: string; priority?: string }): Promise<PaginatedResponse<Ticket>> => {
-    return httpClient.get<PaginatedResponse<Ticket>>('/api/v1/tickets', params);
+const BASE_URL = '/api/v1/tickets';
+
+export const ticketService = {
+  // Get all tickets with pagination and filters
+  async getTickets(
+    params?: PaginationParams & {
+      status?: TicketStatus;
+      priority?: TicketPriority;
+      assignedTo?: string;
+      customerId?: string;
+    }
+  ): Promise<PaginatedResponse<Ticket>> {
+    return await httpClient.get<PaginatedResponse<Ticket>>(BASE_URL, { params });
   },
 
-  get: async (id: string): Promise<Ticket> => {
-    return httpClient.get<Ticket>(`/api/v1/tickets/${id}`);
+  // Get my tickets
+  async getMyTickets(params?: PaginationParams): Promise<PaginatedResponse<Ticket>> {
+    return await httpClient.get<PaginatedResponse<Ticket>>(`${BASE_URL}/my-tickets`, { params });
   },
 
-  create: async (data: CreateTicketRequest): Promise<Ticket> => {
-    return httpClient.post<Ticket>('/api/v1/tickets', data);
+  // Get overdue tickets
+  async getOverdueTickets(params?: PaginationParams): Promise<Ticket[]> {
+    return await httpClient.get<Ticket[]>(`${BASE_URL}/overdue`, { params });
   },
 
-  update: async (id: string, data: UpdateTicketRequest): Promise<Ticket> => {
-    return httpClient.put<Ticket>(`/api/v1/tickets/${id}`, data);
+  // Get single ticket by ID
+  async getTicket(id: string): Promise<Ticket> {
+    return await httpClient.get<Ticket>(`${BASE_URL}/${id}`);
   },
 
-  delete: async (id: string): Promise<void> => {
-    return httpClient.delete<void>(`/api/v1/tickets/${id}`);
+  // Create new ticket
+  async createTicket(data: CreateTicketRequest): Promise<Ticket> {
+    return await httpClient.post<Ticket>(BASE_URL, data);
   },
 
-  close: async (id: string, data: CloseTicketRequest): Promise<Ticket> => {
-    return httpClient.post<Ticket>(`/api/v1/tickets/${id}/close`, data);
+  // Update existing ticket
+  async updateTicket(id: string, data: UpdateTicketRequest): Promise<Ticket> {
+    return await httpClient.put<Ticket>(`${BASE_URL}/${id}`, data);
   },
 
-  escalate: async (id: string): Promise<Ticket> => {
-    return httpClient.post<Ticket>(`/api/v1/tickets/${id}/escalate`);
+  // Delete ticket
+  async deleteTicket(id: string): Promise<void> {
+    await httpClient.delete(`${BASE_URL}/${id}`);
+  },
+
+  // Assign ticket to user
+  async assignTicket(id: string, data: AssignTicketRequest): Promise<Ticket> {
+    return await httpClient.post<Ticket>(`${BASE_URL}/${id}/assign`, data);
+  },
+
+  // Resolve ticket
+  async resolveTicket(id: string): Promise<void> {
+    await httpClient.post(`${BASE_URL}/${id}/resolve`);
+  },
+
+  // Close ticket
+  async closeTicket(id: string): Promise<void> {
+    await httpClient.post(`${BASE_URL}/${id}/close`);
+  },
+
+  // Pause SLA
+  async pauseSLA(id: string, data: PauseSLARequest): Promise<void> {
+    await httpClient.post(`${BASE_URL}/${id}/pause-sla`, data);
+  },
+
+  // Resume SLA
+  async resumeSLA(id: string): Promise<void> {
+    await httpClient.post(`${BASE_URL}/${id}/resume-sla`);
+  },
+
+  // Escalate ticket
+  async escalateTicket(id: string): Promise<void> {
+    await httpClient.post(`${BASE_URL}/${id}/escalate`);
   },
 };
