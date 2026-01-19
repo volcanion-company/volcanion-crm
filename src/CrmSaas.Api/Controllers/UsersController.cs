@@ -10,32 +10,20 @@ using Microsoft.EntityFrameworkCore;
 namespace CrmSaas.Api.Controllers;
 
 [Authorize]
-public class UsersController : BaseController
+public class UsersController(
+    TenantDbContext db,
+    MasterDbContext masterDb,
+    ICurrentUserService currentUser,
+    IAuditService auditService,
+    IAuthService authService) : BaseController
 {
-    private readonly TenantDbContext _db;
-    private readonly ICurrentUserService _currentUser;
-    private readonly IAuditService _auditService;
-    private readonly IAuthService _authService;
-
-    public UsersController(
-        TenantDbContext db,
-        ICurrentUserService currentUser,
-        IAuditService auditService,
-        IAuthService authService)
-    {
-        _db = db;
-        _currentUser = currentUser;
-        _auditService = auditService;
-        _authService = authService;
-    }
-
     [HttpGet]
     [RequirePermission(Permissions.UserView)]
     public async Task<ActionResult<ApiResponse<PagedResult<UserResponse>>>> GetAll(
         [FromQuery] PaginationParams pagination,
         [FromQuery] UserStatus? status = null)
     {
-        var query = _db.Users
+        var query = db.Users
             .AsNoTracking()
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
@@ -50,6 +38,7 @@ public class UsersController : BaseController
             .Select(u => new UserResponse
             {
                 Id = u.Id,
+                TenantId = u.TenantId,
                 Email = u.Email,
                 FirstName = u.FirstName,
                 LastName = u.LastName,
@@ -61,6 +50,18 @@ public class UsersController : BaseController
             })
             .ToPagedResultAsync(pagination.PageNumber, pagination.PageSize);
 
+        // Get tenant info for all users in result
+        var tenantIds = result.Items.Select(u => u.TenantId).Distinct().ToList();
+        var tenants = await masterDb.Tenants
+            .AsNoTracking()
+            .Where(t => tenantIds.Contains(t.Id))
+            .ToDictionaryAsync(t => t.Id, t => new TenantInfo { Id = t.Id, Name = t.Name, Identifier = t.Identifier });
+
+        foreach (var user in result.Items)
+        {
+            user.Tenant = tenants.GetValueOrDefault(user.TenantId);
+        }
+
         return OkResponse(result);
     }
 
@@ -68,7 +69,7 @@ public class UsersController : BaseController
     [RequirePermission(Permissions.UserView)]
     public async Task<ActionResult<ApiResponse<UserDetailResponse>>> GetById(Guid id)
     {
-        var user = await _db.Users
+        var user = await db.Users
             .AsNoTracking()
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
@@ -79,14 +80,20 @@ public class UsersController : BaseController
             return NotFoundResponse<UserDetailResponse>($"User with id {id} not found");
         }
 
-        return OkResponse(MapToDetailResponse(user));
+        var tenant = await masterDb.Tenants
+            .AsNoTracking()
+            .Where(t => t.Id == user.TenantId)
+            .Select(t => new TenantInfo { Id = t.Id, Name = t.Name, Identifier = t.Identifier })
+            .FirstOrDefaultAsync();
+
+        return OkResponse(MapToDetailResponse(user, tenant));
     }
 
     [HttpPost]
     [RequirePermission(Permissions.UserCreate)]
     public async Task<ActionResult<ApiResponse<UserResponse>>> Create([FromBody] CreateUserRequest request)
     {
-        if (await _db.Users.AnyAsync(u => u.Email == request.Email))
+        if (await db.Users.AnyAsync(u => u.Email == request.Email))
         {
             return BadRequestResponse<UserResponse>("Email already exists");
         }
@@ -94,34 +101,34 @@ public class UsersController : BaseController
         var user = new User
         {
             Email = request.Email,
-            PasswordHash = _authService.HashPassword(request.Password),
+            PasswordHash = authService.HashPassword(request.Password),
             FirstName = request.FirstName,
             LastName = request.LastName,
             Phone = request.Phone,
             TimeZone = request.TimeZone ?? "UTC",
             Culture = request.Culture ?? "en-US",
             Status = UserStatus.Active,
-            CreatedBy = _currentUser.UserId
+            CreatedBy = currentUser.UserId
         };
 
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
 
         // Assign roles
         if (request.RoleIds != null && request.RoleIds.Any())
         {
             foreach (var roleId in request.RoleIds)
             {
-                _db.Set<UserRole>().Add(new UserRole
+                db.Set<UserRole>().Add(new UserRole
                 {
                     UserId = user.Id,
                     RoleId = roleId
                 });
             }
-            await _db.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
-        await _auditService.LogAsync(AuditActions.Create, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.Create, nameof(User), user.Id, user.Email);
 
         return CreatedResponse(new UserResponse
         {
@@ -139,7 +146,7 @@ public class UsersController : BaseController
     [RequirePermission(Permissions.UserUpdate)]
     public async Task<ActionResult<ApiResponse<UserResponse>>> Update(Guid id, [FromBody] UpdateUserRequest request)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await db.Users.FindAsync(id);
 
         if (user == null)
         {
@@ -151,20 +158,20 @@ public class UsersController : BaseController
         user.Phone = request.Phone ?? user.Phone;
         user.TimeZone = request.TimeZone ?? user.TimeZone;
         user.Culture = request.Culture ?? user.Culture;
-        user.UpdatedBy = _currentUser.UserId;
+        user.UpdatedBy = currentUser.UserId;
 
         // Update roles if provided
         if (request.RoleIds != null)
         {
-            var existingRoles = await _db.Set<UserRole>()
+            var existingRoles = await db.Set<UserRole>()
                 .Where(ur => ur.UserId == user.Id)
                 .ToListAsync();
             
-            _db.Set<UserRole>().RemoveRange(existingRoles);
+            db.Set<UserRole>().RemoveRange(existingRoles);
             
             foreach (var roleId in request.RoleIds)
             {
-                _db.Set<UserRole>().Add(new UserRole
+                db.Set<UserRole>().Add(new UserRole
                 {
                     UserId = user.Id,
                     RoleId = roleId
@@ -172,9 +179,9 @@ public class UsersController : BaseController
             }
         }
 
-        await _db.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
-        await _auditService.LogAsync(AuditActions.Update, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.Update, nameof(User), user.Id, user.Email);
 
         return OkResponse(new UserResponse
         {
@@ -192,7 +199,7 @@ public class UsersController : BaseController
     [RequirePermission(Permissions.UserUpdate)]
     public async Task<ActionResult<ApiResponse>> Activate(Guid id)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await db.Users.FindAsync(id);
 
         if (user == null)
         {
@@ -200,11 +207,11 @@ public class UsersController : BaseController
         }
 
         user.Status = UserStatus.Active;
-        user.UpdatedBy = _currentUser.UserId;
+        user.UpdatedBy = currentUser.UserId;
 
-        await _db.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
-        await _auditService.LogAsync(AuditActions.StatusChange, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.StatusChange, nameof(User), user.Id, user.Email);
 
         return OkResponse("User activated");
     }
@@ -213,24 +220,24 @@ public class UsersController : BaseController
     [RequirePermission(Permissions.UserUpdate)]
     public async Task<ActionResult<ApiResponse>> Deactivate(Guid id)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await db.Users.FindAsync(id);
 
         if (user == null)
         {
             return NotFoundResponse($"User with id {id} not found");
         }
 
-        if (user.Id == _currentUser.UserId)
+        if (user.Id == currentUser.UserId)
         {
             return BadRequestResponse("Cannot deactivate yourself");
         }
 
         user.Status = UserStatus.Inactive;
-        user.UpdatedBy = _currentUser.UserId;
+        user.UpdatedBy = currentUser.UserId;
 
-        await _db.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
-        await _auditService.LogAsync(AuditActions.StatusChange, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.StatusChange, nameof(User), user.Id, user.Email);
 
         return OkResponse("User deactivated");
     }
@@ -239,7 +246,7 @@ public class UsersController : BaseController
     [RequirePermission(Permissions.UserUpdate)]
     public async Task<ActionResult<ApiResponse<string>>> ResetPassword(Guid id)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await db.Users.FindAsync(id);
 
         if (user == null)
         {
@@ -247,12 +254,12 @@ public class UsersController : BaseController
         }
 
         var newPassword = GenerateTemporaryPassword();
-        user.PasswordHash = _authService.HashPassword(newPassword);
-        user.UpdatedBy = _currentUser.UserId;
+        user.PasswordHash = authService.HashPassword(newPassword);
+        user.UpdatedBy = currentUser.UserId;
 
-        await _db.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
-        await _auditService.LogAsync(AuditActions.PasswordReset, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.PasswordReset, nameof(User), user.Id, user.Email);
 
         return OkResponse(newPassword, "Password reset successful. New password generated.");
     }
@@ -260,24 +267,24 @@ public class UsersController : BaseController
     [HttpPost("change-password")]
     public async Task<ActionResult<ApiResponse>> ChangePassword([FromBody] ChangePasswordRequest request)
     {
-        var user = await _db.Users.FindAsync(_currentUser.UserId);
+        var user = await db.Users.FindAsync(currentUser.UserId);
 
         if (user == null)
         {
             return NotFoundResponse("User not found");
         }
 
-        if (!_authService.VerifyPassword(request.CurrentPassword, user.PasswordHash))
+        if (!authService.VerifyPassword(request.CurrentPassword, user.PasswordHash))
         {
             return BadRequestResponse("Current password is incorrect");
         }
 
-        user.PasswordHash = _authService.HashPassword(request.NewPassword);
-        user.UpdatedBy = _currentUser.UserId;
+        user.PasswordHash = authService.HashPassword(request.NewPassword);
+        user.UpdatedBy = currentUser.UserId;
 
-        await _db.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
-        await _auditService.LogAsync(AuditActions.PasswordChanged, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.PasswordChanged, nameof(User), user.Id, user.Email);
 
         return OkResponse("Password changed successfully");
     }
@@ -286,29 +293,31 @@ public class UsersController : BaseController
     [RequirePermission(Permissions.UserDelete)]
     public async Task<ActionResult<ApiResponse>> Delete(Guid id)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await db.Users.FindAsync(id);
 
         if (user == null)
         {
             return NotFoundResponse($"User with id {id} not found");
         }
 
-        if (user.Id == _currentUser.UserId)
+        if (user.Id == currentUser.UserId)
         {
             return BadRequestResponse("Cannot delete yourself");
         }
 
-        _db.Users.Remove(user);
-        await _db.SaveChangesAsync();
+        db.Users.Remove(user);
+        await db.SaveChangesAsync();
 
-        await _auditService.LogAsync(AuditActions.Delete, nameof(User), user.Id, user.Email);
+        await auditService.LogAsync(AuditActions.Delete, nameof(User), user.Id, user.Email);
 
         return OkResponse("User deleted");
     }
 
-    private static UserDetailResponse MapToDetailResponse(User user) => new()
+    private static UserDetailResponse MapToDetailResponse(User user, TenantInfo? tenant = null) => new()
     {
         Id = user.Id,
+        TenantId = user.TenantId,
+        Tenant = tenant,
         Email = user.Email,
         FirstName = user.FirstName,
         LastName = user.LastName,
@@ -341,6 +350,8 @@ public class UsersController : BaseController
 public class UserResponse
 {
     public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public TenantInfo? Tenant { get; set; }
     public string Email { get; set; } = string.Empty;
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
@@ -349,6 +360,13 @@ public class UserResponse
     public List<string> Roles { get; set; } = [];
     public DateTime? LastLoginAt { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public class TenantInfo
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Identifier { get; set; } = string.Empty;
 }
 
 public class UserDetailResponse : UserResponse
@@ -388,10 +406,4 @@ public class UpdateUserRequest
     public string? TimeZone { get; set; }
     public string? Culture { get; set; }
     public List<Guid>? RoleIds { get; set; }
-}
-
-public class ChangePasswordRequest
-{
-    public string CurrentPassword { get; set; } = string.Empty;
-    public string NewPassword { get; set; } = string.Empty;
 }

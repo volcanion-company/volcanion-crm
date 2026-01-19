@@ -117,6 +117,7 @@ public class ActivityReminderService : IActivityReminderService
         var dueReminders = await _context.ActivityReminders
             .Include(r => r.Activity)
             .Where(r => !r.IsSent && r.ScheduledFor <= DateTime.UtcNow)
+            .OrderBy(r => r.ScheduledFor) // Order by scheduled time to process oldest first
             .Take(100) // Process 100 at a time
             .ToListAsync(cancellationToken);
 

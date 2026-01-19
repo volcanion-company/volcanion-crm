@@ -131,6 +131,76 @@ public class AuthController : BaseController
 
         return OkResponse(user);
     }
+
+    /// <summary>
+    /// Update current user profile
+    /// </summary>
+    [HttpPut("profile")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<UserProfileResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse), 400)]
+    [ProducesResponseType(typeof(ApiResponse), 404)]
+    public async Task<ActionResult<ApiResponse<UserProfileResponse>>> UpdateProfile([FromBody] UpdateProfileRequest request)
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        
+        if (!Guid.TryParse(userId, out var userGuid))
+        {
+            return BadRequestResponse<UserProfileResponse>("Invalid user");
+        }
+
+        try
+        {
+            var user = await _authService.UpdateProfileAsync(userGuid, request);
+            
+            if (user == null)
+            {
+                return NotFoundResponse<UserProfileResponse>("User not found");
+            }
+
+            var response = new UserProfileResponse
+            {
+                Id = user.Id.ToString(),
+                Email = user.Email,
+                Name = user.FullName,
+                TenantId = user.TenantId.ToString(),
+                Roles = User.FindAll(System.Security.Claims.ClaimTypes.Role).Select(c => c.Value).ToList(),
+                Permissions = User.FindAll("permission").Select(c => c.Value).ToList()
+            };
+
+            return OkResponse(response, "Profile updated successfully");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequestResponse<UserProfileResponse>(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Change current user password
+    /// </summary>
+    [HttpPut("change-password")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse), 200)]
+    [ProducesResponseType(typeof(ApiResponse), 400)]
+    public async Task<ActionResult<ApiResponse>> ChangePassword([FromBody] ChangePasswordRequest request)
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        
+        if (!Guid.TryParse(userId, out var userGuid))
+        {
+            return BadRequestResponse("Invalid user");
+        }
+
+        var success = await _authService.ChangePasswordAsync(userGuid, request);
+        
+        if (!success)
+        {
+            return BadRequestResponse("Current password is incorrect");
+        }
+
+        return OkResponse("Password changed successfully");
+    }
 }
 
 public class AuthResponse

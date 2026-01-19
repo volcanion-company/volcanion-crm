@@ -17,7 +17,32 @@ public class HangfireHealthCheck : IHealthCheck
     {
         try
         {
-            var monitoringApi = JobStorage.Current.GetMonitoringApi();
+            // Check if JobStorage has been initialized
+            JobStorage? storage;
+            try
+            {
+                storage = JobStorage.Current;
+            }
+            catch (InvalidOperationException)
+            {
+                // JobStorage.Current throws if not initialized
+                return Task.FromResult(HealthCheckResult.Degraded("Hangfire storage not yet initialized", null, new Dictionary<string, object>
+                {
+                    { "initialized", false },
+                    { "timestamp", DateTime.UtcNow }
+                }));
+            }
+
+            if (storage == null)
+            {
+                return Task.FromResult(HealthCheckResult.Degraded("Hangfire storage is null", null, new Dictionary<string, object>
+                {
+                    { "initialized", false },
+                    { "timestamp", DateTime.UtcNow }
+                }));
+            }
+
+            var monitoringApi = storage.GetMonitoringApi();
             
             var servers = monitoringApi.Servers();
             var serverCount = servers.Count;

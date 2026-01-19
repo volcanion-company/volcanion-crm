@@ -8,4 +8,5 @@ public class CorsSettings
     public string[] AllowedMethods { get; set; } = [];
     public string[] AllowedHeaders { get; set; } = [];
     public bool AllowCredentials { get; set; } = true;
+    public bool AllowAll { get; set; } = false;
 }

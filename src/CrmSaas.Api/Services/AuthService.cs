@@ -17,6 +17,8 @@ public interface IAuthService
     Task<AuthResult> RefreshTokenAsync(string refreshToken, string? ipAddress = null);
     Task<bool> RevokeTokenAsync(string refreshToken, string? ipAddress = null);
     Task<bool> RevokeAllTokensAsync(Guid userId, string? ipAddress = null);
+    Task<User?> UpdateProfileAsync(Guid userId, UpdateProfileRequest request);
+    Task<bool> ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
     string HashPassword(string password);
     bool VerifyPassword(string password, string hash);
 }
@@ -186,6 +188,68 @@ public class AuthService : IAuthService
         return true;
     }
 
+    public async Task<User?> UpdateProfileAsync(Guid userId, UpdateProfileRequest request)
+    {
+        var user = await _db.Users.FindAsync(userId);
+        
+        if (user == null)
+        {
+            return null;
+        }
+
+        // Check if email is being changed and if it's already taken
+        if (request.Email != user.Email)
+        {
+            var emailExists = await _db.Users.AnyAsync(u => u.Email == request.Email && u.Id != userId);
+            if (emailExists)
+            {
+                throw new InvalidOperationException("Email already exists");
+            }
+            user.Email = request.Email;
+        }
+
+        user.FirstName = request.FirstName;
+        user.LastName = request.LastName;
+        user.Phone = request.Phone;
+        user.TimeZone = request.TimeZone ?? user.TimeZone;
+        user.Culture = request.Culture ?? user.Culture;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("User {UserId} updated profile", userId);
+
+        return user;
+    }
+
+    public async Task<bool> ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
+    {
+        var user = await _db.Users.FindAsync(userId);
+        
+        if (user == null)
+        {
+            return false;
+        }
+
+        // Verify current password
+        if (!VerifyPassword(request.CurrentPassword, user.PasswordHash))
+        {
+            _logger.LogWarning("Failed password change attempt for user {UserId} - incorrect current password", userId);
+            return false;
+        }
+
+        // Update to new password
+        user.PasswordHash = HashPassword(request.NewPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        user.PasswordChangedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("User {UserId} changed password", userId);
+
+        return true;
+    }
+
     public string HashPassword(string password)
     {
         using var sha256 = SHA256.Create();
@@ -344,4 +408,20 @@ public class UserDto
     public Guid TenantId { get; set; }
     public List<string> Roles { get; set; } = [];
     public List<string> Permissions { get; set; } = [];
+}
+
+public class UpdateProfileRequest
+{
+    public string Email { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public string? Phone { get; set; }
+    public string? TimeZone { get; set; }
+    public string? Culture { get; set; }
+}
+
+public class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
 }

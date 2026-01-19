@@ -1,5 +1,6 @@
 using CrmSaas.Api.Entities;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -9,14 +10,30 @@ public static class DatabaseSeeder
 {
     public static async Task SeedAsync(MasterDbContext masterDb, TenantDbContext tenantDb)
     {
-        await SeedPermissionsAsync(masterDb);
-        await SeedDefaultTenantAsync(masterDb);
-        await SeedDefaultRolesAndUserAsync(tenantDb, masterDb);
+        Log.Information("Starting database seeding...");
+        
+        // Use TenantDbContext for ALL seeding with single transaction
+        await SeedPermissionsAsync(tenantDb);
+        await SeedDefaultTenantAsync(tenantDb);
+        
+        // DO NOT SaveChanges yet - keep everything in same transaction
+        await SeedDefaultRolesAndUserAsync(tenantDb);
+        
+        // Save EVERYTHING in one transaction
+        await tenantDb.SaveChangesAsync();
+        
+        Log.Information("Database seeding completed");
     }
 
-    private static async Task SeedPermissionsAsync(MasterDbContext db)
+    private static async Task SeedPermissionsAsync(TenantDbContext db)
     {
-        if (await db.Permissions.AnyAsync()) return;
+        if (await db.Permissions.AnyAsync())
+        {
+            Log.Information("Permissions already exist, skipping seeding");
+            return;
+        }
+        
+        Log.Information("Seeding permissions...");
 
         var modules = new[] { "Customer", "Contact", "Lead", "Opportunity", "Order", "Contract", "Ticket", "Campaign", "Activity", "Report", "User", "Role", "Tenant", "Settings" };
         var actions = new[] { "View", "Create", "Update", "Delete", "Export", "Import" };
@@ -39,23 +56,32 @@ public static class DatabaseSeeder
         }
 
         // Add special permissions (avoid duplicates with generated permissions)
-        permissions.AddRange(new[]
-        {
+        permissions.AddRange(
+        [
             new Permission { Id = Guid.NewGuid(), Name = "Assign Lead", Code = "lead.assign", Module = "Lead", Description = "Permission to assign leads" },
             new Permission { Id = Guid.NewGuid(), Name = "Convert Lead", Code = "lead.convert", Module = "Lead", Description = "Permission to convert leads to customers" },
             new Permission { Id = Guid.NewGuid(), Name = "Assign Opportunity", Code = "opportunity.assign", Module = "Opportunity", Description = "Permission to assign opportunities" },
             new Permission { Id = Guid.NewGuid(), Name = "Assign Ticket", Code = "ticket.assign", Module = "Ticket", Description = "Permission to assign tickets" },
             new Permission { Id = Guid.NewGuid(), Name = "View Audit Logs", Code = "audit.view", Module = "Audit", Description = "Permission to view audit logs" },
             new Permission { Id = Guid.NewGuid(), Name = "Manage Tenant Settings", Code = "tenant.settings", Module = "Tenant", Description = "Permission to manage tenant settings" },
-        });
+        ]);
 
         db.Permissions.AddRange(permissions);
-        await db.SaveChangesAsync();
+        // DO NOT save yet - will save in single transaction later
+        
+        Log.Information("Prepared {Count} permissions for seeding", permissions.Count);
     }
 
-    private static async Task SeedDefaultTenantAsync(MasterDbContext db)
+    private static async Task SeedDefaultTenantAsync(TenantDbContext db)
     {
-        if (await db.Tenants.AnyAsync()) return;
+        // Use IgnoreQueryFilters to bypass tenant filtering for seed
+        if (await db.Tenants.IgnoreQueryFilters().AnyAsync())
+        {
+            Log.Information("Default tenant already exists, skipping seeding");
+            return;
+        }
+        
+        Log.Information("Seeding default tenant...");
 
         var defaultTenant = new Tenant
         {
@@ -73,17 +99,25 @@ public static class DatabaseSeeder
         };
 
         db.Tenants.Add(defaultTenant);
-        await db.SaveChangesAsync();
+        // DO NOT save yet - will save in single transaction later
+        
+        Log.Information("Prepared default tenant for seeding: {TenantName} ({TenantId})", defaultTenant.Name, defaultTenant.Identifier);
     }
 
-    private static async Task SeedDefaultRolesAndUserAsync(TenantDbContext tenantDb, MasterDbContext masterDb)
+    private static async Task SeedDefaultRolesAndUserAsync(TenantDbContext tenantDb)
     {
         var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
-        // Check if roles already exist
-        if (await tenantDb.Roles.IgnoreQueryFilters().AnyAsync(r => r.TenantId == defaultTenantId)) return;
+        // Check if roles already exist (use IgnoreQueryFilters for seeding)
+        if (await tenantDb.Roles.IgnoreQueryFilters().AnyAsync(r => r.TenantId == defaultTenantId)) 
+        {
+            Log.Information("Default roles and user already exist, skipping seeding");
+            return;
+        }
+        
+        Log.Information("Seeding default roles, user, pipeline, and SLA for tenant {TenantId}...", defaultTenantId);
 
-        var allPermissions = await masterDb.Permissions.ToListAsync();
+        var allPermissions = await tenantDb.Permissions.IgnoreQueryFilters().ToListAsync();
 
         // Create Admin Role
         var adminRole = new Role
@@ -251,6 +285,11 @@ public static class DatabaseSeeder
         tenantDb.Slas.Add(defaultSla);
 
         await tenantDb.SaveChangesAsync();
+        
+        Log.Information("Seeded default roles: Admin, Sales Manager, Sales Rep, Support Agent");
+        Log.Information("Seeded default admin user: admin@volcanion.vn");
+        Log.Information("Seeded default pipeline with {StageCount} stages", stages.Length);
+        Log.Information("Seeded default SLA");
     }
 
     private static string HashPassword(string password)

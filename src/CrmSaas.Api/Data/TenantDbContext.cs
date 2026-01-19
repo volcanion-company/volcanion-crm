@@ -6,23 +6,12 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace CrmSaas.Api.Data;
 
-public class TenantDbContext : DbContext
+public class TenantDbContext(
+    DbContextOptions<TenantDbContext> options,
+    ITenantContext tenantContext,
+    IDataScopeService? dataScopeService = null,
+    IServiceProvider? serviceProvider = null) : DbContext(options)
 {
-    private readonly ITenantContext _tenantContext;
-    private readonly IDataScopeService? _dataScopeService;
-    private readonly IServiceProvider? _serviceProvider;
-
-    public TenantDbContext(
-        DbContextOptions<TenantDbContext> options,
-        ITenantContext tenantContext,
-        IDataScopeService? dataScopeService = null,
-        IServiceProvider? serviceProvider = null) : base(options)
-    {
-        _tenantContext = tenantContext;
-        _dataScopeService = dataScopeService;
-        _serviceProvider = serviceProvider;
-    }
-
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         base.OnConfiguring(optionsBuilder);
@@ -36,10 +25,14 @@ public class TenantDbContext : DbContext
     // Identity & Access
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
-    // Note: Permission is in MasterDbContext (master schema), not here
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    
+    // Shared entities (also in MasterDbContext but same database with SharedDatabase strategy)
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     // CRM Core
     public DbSet<Customer> Customers => Set<Customer>();
@@ -101,10 +94,8 @@ public class TenantDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Ignore entities from MasterDbContext to avoid cross-database FK constraints
-        modelBuilder.Ignore<Tenant>();
-        modelBuilder.Ignore<Permission>();
-        modelBuilder.Ignore<AuditLog>();
+        // With SharedDatabase strategy, Tenant and Permission are in the same database
+        // Don't ignore them completely, just handle them carefully in configurations
 
         ConfigureIdentityEntities(modelBuilder);
         ConfigureCustomerEntities(modelBuilder);
@@ -129,8 +120,8 @@ public class TenantDbContext : DbContext
             entity.HasIndex(e => new { e.TenantId, e.Email }).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
             
-            // Ignore navigation to Tenant (cross-database relationship)
-            entity.Ignore(e => e.Tenant);
+            // With SharedDatabase strategy, Tenant is in the same database
+            // No need to ignore, EF can handle the relationship
         });
 
         modelBuilder.Entity<Role>(entity =>
@@ -140,8 +131,8 @@ public class TenantDbContext : DbContext
             entity.HasIndex(e => new { e.TenantId, e.Name }).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
             
-            // Ignore navigation to Tenant (cross-database relationship)
-            entity.Ignore(e => e.Tenant);
+            // With SharedDatabase strategy, Tenant is in the same database
+            // No need to ignore, EF can handle the relationship
         });
 
         // Permission is configured in MasterDbContext (master schema)
@@ -175,9 +166,8 @@ public class TenantDbContext : DbContext
                 .HasForeignKey(e => e.RoleId)
                 .OnDelete(DeleteBehavior.Cascade);
                 
-            // Permission is in MasterDbContext - no FK constraint (cross-database)
-            // Only store PermissionId as a property, no navigation
-            entity.Ignore(e => e.Permission);
+            // With SharedDatabase strategy, Permission is in the same database
+            // No need to ignore, EF can handle the relationship
             entity.Property(e => e.PermissionId).IsRequired();
         });
 
@@ -682,9 +672,9 @@ public class TenantDbContext : DbContext
     private void ApplyTenantFilters(ModelBuilder modelBuilder)
     {
         // Apply tenant filter to all tenant entities
-        if (_tenantContext?.TenantId != null)
+        if (tenantContext?.TenantId != null)
         {
-            var tenantId = _tenantContext.TenantId.Value;
+            var tenantId = tenantContext.TenantId.Value;
             
             // Apply combined filters: Tenant + Soft Delete + Data Scope
             ApplyFilter<User>(modelBuilder, tenantId);
@@ -713,7 +703,7 @@ public class TenantDbContext : DbContext
 
     private void ApplyFilter<T>(ModelBuilder modelBuilder, Guid tenantId) where T : TenantAuditableEntity
     {
-        var dataScopeFilter = _dataScopeService?.GetDataScopeFilter<T>();
+        var dataScopeFilter = dataScopeService?.GetDataScopeFilter<T>();
         
         if (dataScopeFilter != null)
         {
@@ -752,10 +742,18 @@ public class TenantDbContext : DbContext
         
         // Process workflows AFTER saving (so entity has Id, etc.)
         // Resolve IWorkflowEngine from service provider to avoid circular dependency
-        var workflowEngine = _serviceProvider?.GetService<IWorkflowEngine>();
-        if (workflowEngine != null && trackedChanges.Any())
+        // Wrap in try-catch to handle case when Hangfire is not yet initialized
+        try
         {
-            await ProcessWorkflowsAsync(trackedChanges, workflowEngine, cancellationToken);
+            var workflowEngine = serviceProvider?.GetService<IWorkflowEngine>();
+            if (workflowEngine != null && trackedChanges.Any())
+            {
+                await ProcessWorkflowsAsync(trackedChanges, workflowEngine, cancellationToken);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Hangfire not initialized yet, skip workflow processing
         }
         
         return result;
@@ -858,7 +856,7 @@ public class TenantDbContext : DbContext
 
     private void SetTenantId()
     {
-        if (_tenantContext?.TenantId == null) return;
+        if (tenantContext?.TenantId == null) return;
 
         var entries = ChangeTracker.Entries<ITenantEntity>()
             .Where(e => e.State == EntityState.Added);
@@ -867,7 +865,7 @@ public class TenantDbContext : DbContext
         {
             if (entry.Entity.TenantId == Guid.Empty)
             {
-                entry.Entity.TenantId = _tenantContext.TenantId.Value;
+                entry.Entity.TenantId = tenantContext.TenantId.Value;
             }
         }
     }

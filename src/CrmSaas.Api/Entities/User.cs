@@ -42,6 +42,8 @@ public class User : TenantAuditableEntity
     
     public DateTime? PasswordResetTokenExpiry { get; set; }
     
+    public DateTime? PasswordChangedAt { get; set; }
+    
     [MaxLength(100)]
     public string? TimeZone { get; set; } = "UTC";
     

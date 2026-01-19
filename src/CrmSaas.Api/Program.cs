@@ -208,7 +208,15 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        if (corsSettings.AllowedOrigins?.Contains("*") == true)
+        // If AllowAll is true, allow all origins
+        if (corsSettings.AllowAll)
+        {
+            policy.AllowAnyOrigin()
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+        // If AllowAll is false or not set, read from AllowedOrigins config
+        else if (corsSettings.AllowedOrigins?.Contains("*") == true)
         {
             policy.AllowAnyOrigin()
                   .AllowAnyHeader()
@@ -357,28 +365,16 @@ builder.Services.AddMemoryCache();
 // ========================================
 // HANGFIRE - BACKGROUND JOBS
 // ========================================
-var hangfireConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+// Add Hangfire services but storage will be configured after DB migration
 builder.Services.AddHangfire(config =>
 {
+    // Minimal configuration - storage will be set later after DB is ready
     config.SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
         .UseSimpleAssemblyNameTypeSerializer()
-        .UseRecommendedSerializerSettings()
-        .UseSqlServerStorage(hangfireConnectionString, new Hangfire.SqlServer.SqlServerStorageOptions
-        {
-            CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-            SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
-            QueuePollInterval = TimeSpan.Zero,
-            UseRecommendedIsolationLevel = true,
-            DisableGlobalLocks = true,
-            SchemaName = "hangfire"
-        });
+        .UseRecommendedSerializerSettings();
 });
 
-builder.Services.AddHangfireServer(options =>
-{
-    options.WorkerCount = Environment.ProcessorCount * 2;
-    options.ServerName = $"{Environment.MachineName}:{Guid.NewGuid()}";
-});
+// Don't add HangfireServer yet - will be added after DB initialization
 
 // ========================================
 // BUILD APPLICATION
@@ -420,8 +416,9 @@ if (app.Environment.IsDevelopment())
 // CORS (must be before HTTPS redirection to handle preflight requests)
 app.UseCors();
 
-// HTTPS Redirection (skip in Development when using HTTP)
-if (!app.Environment.IsDevelopment())
+// HTTPS Redirection (disable when running under IIS to avoid warnings)
+// IIS handles HTTPS redirection at the server level
+if (!app.Environment.IsDevelopment() && Environment.GetEnvironmentVariable("APP_RUNNING_IN_CONTAINER") == "true")
 {
     app.UseHttpsRedirection();
 }
@@ -436,24 +433,13 @@ app.UseAuthorization();
 // Multi-tenancy middleware (after authentication)
 app.UseMiddleware<TenantMiddleware>();
 
-// Hangfire Dashboard (only in Development or with authentication)
-if (app.Environment.IsDevelopment())
-{
-    app.UseHangfireDashboard("/hangfire", new Hangfire.DashboardOptions
-    {
-        Authorization = new[] { new CrmSaas.Api.HangfireAuthorizationFilter() }
-    });
-}
-
-// Health check endpoint
-app.MapHealthChecks("/health");
-
 // Map controllers
 app.MapControllers();
 
 // ========================================
 // DATABASE INITIALIZATION
 // ========================================
+var hangfireInitialized = false;
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -461,17 +447,123 @@ using (var scope = app.Services.CreateScope())
     {
         var masterContext = services.GetRequiredService<MasterDbContext>();
         var tenantContext = services.GetRequiredService<TenantDbContext>();
+        var tenantContextService = services.GetRequiredService<ITenantContext>();
         
         Log.Information("Applying database migrations...");
         
+        // Migrate master database first
         await masterContext.Database.MigrateAsync();
+        
+        // Set default tenant context for seeding
+        var defaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        tenantContextService.SetTenantId(defaultTenantId);
+        
+        // Now migrate tenant database with proper context
         await tenantContext.Database.MigrateAsync();
         
+        // ========================================
+        // HANGFIRE INITIALIZATION (right after migrations, before seeding)
+        // ========================================
+        // Initialize Hangfire storage immediately after migrations
+        // This ensures Hangfire tables are created and available
+        Log.Information("Configuring Hangfire storage...");
+        var hangfireConnectionString = app.Configuration.GetConnectionString("DefaultConnection");
+        GlobalConfiguration.Configuration
+            .UseSqlServerStorage(hangfireConnectionString, new Hangfire.SqlServer.SqlServerStorageOptions
+            {
+                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+                QueuePollInterval = TimeSpan.Zero,
+                UseRecommendedIsolationLevel = true,
+                DisableGlobalLocks = true,
+                SchemaName = "hangfire"
+            });
+        Log.Information("Hangfire storage configured successfully");
+        
+        // Start Hangfire background job server
+        Log.Information("Starting Hangfire background job server...");
+        var hangfireServer = new BackgroundJobServer(new BackgroundJobServerOptions
+        {
+            WorkerCount = Environment.ProcessorCount * 2,
+            ServerName = $"{Environment.MachineName}:{Guid.NewGuid()}"
+        });
+        Log.Information("Hangfire server started successfully");
+        
+        // Mark Hangfire as initialized
+        hangfireInitialized = true;
+        
+        // ========================================
+        // DATABASE SEEDING (after Hangfire is ready)
+        // ========================================
         Log.Information("Seeding database...");
         
         await DatabaseSeeder.SeedAsync(masterContext, tenantContext);
         
-        Log.Information("Database initialization completed");
+        Log.Information("Database initialization completed successfully");
+        Log.Information("Default admin user: admin@volcanion.vn / Admin@123");
+        
+        // ========================================
+        // SETUP RECURRING JOBS (after Hangfire is fully initialized)
+        // ========================================
+        Log.Information("Configuring recurring jobs...");
+        var backgroundJobService = services.GetRequiredService<IBackgroundJobService>();
+        
+        // SLA breach check - every 5 minutes
+        backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
+            "sla-breach-check",
+            x => x.CheckSlaBreachesAsync(),
+            "*/5 * * * *"); // Every 5 minutes
+        
+        // Activity reminders - every 15 minutes
+        backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
+            "activity-reminders",
+            x => x.SendActivityRemindersAsync(),
+            "*/15 * * * *"); // Every 15 minutes
+        
+        // Scheduled workflow processing - every minute
+        backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
+            "scheduled-workflows",
+            x => x.ProcessScheduledWorkflowsAsync(),
+            "* * * * *"); // Every minute
+        
+        // Contract renewal reminders - daily at 9 AM
+        backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
+            "contract-renewal-reminders",
+            x => x.SendContractRenewalRemindersAsync(),
+            "0 9 * * *"); // 9 AM daily
+        
+        // Cleanup old notifications - daily at 2 AM
+        backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
+            "cleanup-old-notifications",
+            x => x.CleanupOldNotificationsAsync(),
+            "0 2 * * *"); // 2 AM daily
+        
+        // Purge deleted records - weekly on Sundays at 3 AM
+        backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
+            "purge-deleted-records",
+            x => x.PurgeDeletedRecordsAsync(),
+            "0 3 * * 0"); // 3 AM every Sunday
+        
+        // Process pending webhook deliveries - every minute
+        var webhookDeliveryService = services.GetRequiredService<IWebhookDeliveryService>();
+        RecurringJob.AddOrUpdate<IWebhookDeliveryService>(
+            "process-pending-webhooks",
+            x => x.ProcessPendingDeliveriesAsync(default),
+            "* * * * *"); // Every minute
+        
+        // Retry failed webhook deliveries - every 5 minutes
+        RecurringJob.AddOrUpdate<IWebhookDeliveryService>(
+            "retry-failed-webhooks",
+            x => x.RetryFailedDeliveriesAsync(default),
+            "*/5 * * * *"); // Every 5 minutes
+        
+        // Send activity reminders - every 5 minutes
+        RecurringJob.AddOrUpdate<IActivityReminderService>(
+            "send-activity-reminders",
+            x => x.SendDueRemindersAsync(default),
+            "*/5 * * * *"); // Every 5 minutes
+        
+        Log.Information("Recurring jobs configured successfully");
     }
     catch (Exception ex)
     {
@@ -483,68 +575,15 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ========================================
-// SETUP RECURRING JOBS
+// HANGFIRE DASHBOARD (after storage is configured)
 // ========================================
-using (var scope = app.Services.CreateScope())
+if (hangfireInitialized && app.Environment.IsDevelopment())
 {
-    var backgroundJobService = scope.ServiceProvider.GetRequiredService<IBackgroundJobService>();
-    
-    // SLA breach check - every 5 minutes
-    backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
-        "sla-breach-check",
-        x => x.CheckSlaBreachesAsync(),
-        "*/5 * * * *"); // Every 5 minutes
-    
-    // Activity reminders - every 15 minutes
-    backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
-        "activity-reminders",
-        x => x.SendActivityRemindersAsync(),
-        "*/15 * * * *"); // Every 15 minutes
-    
-    // Scheduled workflow processing - every minute
-    backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
-        "scheduled-workflows",
-        x => x.ProcessScheduledWorkflowsAsync(),
-        "* * * * *"); // Every minute
-    
-    // Contract renewal reminders - daily at 9 AM
-    backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
-        "contract-renewal-reminders",
-        x => x.SendContractRenewalRemindersAsync(),
-        "0 9 * * *"); // 9 AM daily
-    
-    // Cleanup old notifications - daily at 2 AM
-    backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
-        "cleanup-old-notifications",
-        x => x.CleanupOldNotificationsAsync(),
-        "0 2 * * *"); // 2 AM daily
-    
-    // Purge deleted records - weekly on Sundays at 3 AM
-    backgroundJobService.AddOrUpdateRecurringJob<ScheduledJobsService>(
-        "purge-deleted-records",
-        x => x.PurgeDeletedRecordsAsync(),
-        "0 3 * * 0"); // 3 AM every Sunday
-    
-    // Process pending webhook deliveries - every minute
-    var webhookDeliveryService = scope.ServiceProvider.GetRequiredService<IWebhookDeliveryService>();
-    RecurringJob.AddOrUpdate<IWebhookDeliveryService>(
-        "process-pending-webhooks",
-        x => x.ProcessPendingDeliveriesAsync(default),
-        "* * * * *"); // Every minute
-    
-    // Retry failed webhook deliveries - every 5 minutes
-    RecurringJob.AddOrUpdate<IWebhookDeliveryService>(
-        "retry-failed-webhooks",
-        x => x.RetryFailedDeliveriesAsync(default),
-        "*/5 * * * *"); // Every 5 minutes
-    
-    // Send activity reminders - every 5 minutes
-    RecurringJob.AddOrUpdate<IActivityReminderService>(
-        "send-activity-reminders",
-        x => x.SendDueRemindersAsync(default),
-        "*/5 * * * *"); // Every 5 minutes
-    
-    Log.Information("Recurring jobs configured successfully");
+    app.UseHangfireDashboard("/hangfire", new DashboardOptions
+    {
+        Authorization = [new CrmSaas.Api.HangfireAuthorizationFilter()]
+    });
+    Log.Information("Hangfire Dashboard available at /hangfire");
 }
 
 // ========================================
